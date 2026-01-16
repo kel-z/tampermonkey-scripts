@@ -7,8 +7,8 @@
 // @match        https://canvas.ubc.ca/courses/*
 // @grant        none
 // @run-at       document-start
-// @downloadURL  https://raw.githubusercontent.com/kel-z/tampermonkey-scripts/main/ubc-canvas-feedback-redactor.user.js
-// @updateURL     https://raw.githubusercontent.com/kel-z/tampermonkey-scripts/main/ubc-canvas-feedback-redactor.user.js
+// @downloadURL  https://raw.githubusercontent.com/kel-z/tampermonkey-scripts/main/scripts/ubc-canvas-feedback-redactor.user.js
+// @updateURL     https://raw.githubusercontent.com/kel-z/tampermonkey-scripts/main/scripts/ubc-canvas-feedback-redactor.user.js
 // ==/UserScript==
 
 (function() {
