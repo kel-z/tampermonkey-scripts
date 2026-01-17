@@ -4,7 +4,7 @@
 // @version      1.0
 // @description  Redacts Recent Feedback scores on UBC Canvas until hovered
 // @author       kel-z
-// @match        https://canvas.ubc.ca/courses/*
+// @match        https://canvas.ubc.ca/*
 // @grant        none
 // @run-at       document-start
 // @downloadURL  https://raw.githubusercontent.com/kel-z/tampermonkey-scripts/main/scripts/ubc-canvas-feedback-redactor.user.js
