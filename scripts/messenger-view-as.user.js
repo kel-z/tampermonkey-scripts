@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Messenger View As
 // @namespace    https://github.com/kel-z/
-// @version      1.1
+// @version      1.1.1
 // @description  Add a "View as" dropdown to Messenger that visually flips a chat to another person's perspective
 // @author       kel-z
 // @match        https://www.messenger.com/*
@@ -54,26 +54,28 @@
     let sig = 0;            // bumped on mode/thread change to force reprocessing
     let forceRefresh = false; // one-shot: rebuild injected avatars/labels next pass
     let myAvatarUrl = null;
-    let sampleCache = null; // cached pristine blue/grey bubble colours (per thread)
+    let sampleCache = null; // cached bubble colours (per thread)
     let labelStyleCache = null; // cached native sender-label {color,size} (per thread)
     let knownMembers = [];  // first names seen as senders (excluding "You")
 
-    // Display name above my runs. Prefer GM storage (survives the page clearing
-    // localStorage); fall back to localStorage — which also migrates a name saved
-    // by the pre-GM version and covers GM read/write failures. Blank = no label.
+    // Settings (name + avatar shown above my runs), persisted. Prefer GM storage
+    // (survives the page clearing localStorage); fall back to localStorage — which
+    // also migrates pre-GM values and covers GM read/write failures.
     const NAME_KEY = 'mva-my-name';
+    const PFP_KEY = 'mva-my-pfp';
     const DEFAULT_NAME = 'You';
     const hasGM = typeof GM_getValue === 'function' && typeof GM_setValue === 'function';
-    function loadName() {
-        try { if (hasGM) { const v = GM_getValue(NAME_KEY, null); if (v !== null) return v; } } catch (e) {}
-        try { const v = localStorage.getItem(NAME_KEY); if (v !== null) return v; } catch (e) {}
-        return DEFAULT_NAME;
+    function loadSetting(key, def) {
+        try { if (hasGM) { const v = GM_getValue(key, null); if (v !== null) return v; } } catch (e) {}
+        try { const v = localStorage.getItem(key); if (v !== null) return v; } catch (e) {}
+        return def;
     }
-    function saveName(v) {
-        try { if (hasGM) { GM_setValue(NAME_KEY, v); return; } } catch (e) {}
-        try { localStorage.setItem(NAME_KEY, v); } catch (e) {}
+    function saveSetting(key, v) {
+        try { if (hasGM) { GM_setValue(key, v); return; } } catch (e) {}
+        try { localStorage.setItem(key, v); } catch (e) {}
     }
-    let myDisplayName = loadName();
+    let myDisplayName = loadSetting(NAME_KEY, DEFAULT_NAME);
+    let myCustomPfp = loadSetting(PFP_KEY, '');
 
     // ----------------------------- styles --------------------------------
     function injectStyles() {
@@ -109,13 +111,14 @@
             }
             #mva-gear:hover { color: var(--primary-text, #e4e6eb); }
             #mva-pop {
-                display: none; position: absolute; top: 100%; right: 0; margin-top: 8px;
+                display: none; flex-direction: column; gap: 10px;
+                position: absolute; top: 100%; right: 0; margin-top: 8px;
                 background: var(--card-background, var(--surface-background, var(--comment-background, #242526)));
                 color: var(--primary-text, #e4e6eb);
                 border: 1px solid var(--divider, rgba(128,128,128,.25)); border-radius: 12px;
                 padding: 10px 12px; box-shadow: var(--shadow-5, 0 8px 24px rgba(0,0,0,.4)); white-space: nowrap;
             }
-            #mva-pop.mva-open { display: block; }
+            #mva-pop.mva-open { display: flex; }
             #mva-pop label { display: flex; flex-direction: column; gap: 6px; color: var(--secondary-text, #b0b3b8); }
             #mva-pop input {
                 background: var(--secondary-button-background, var(--comment-background, rgba(128,128,128,.15)));
@@ -124,6 +127,20 @@
                 padding: 5px 8px; font: inherit; width: 160px;
             }
             #mva-pop input:focus { border-color: var(--accent, #0a84ff); outline: none; }
+            #mva-pop .mva-field { display: flex; flex-direction: column; gap: 6px; color: var(--secondary-text, #b0b3b8); }
+            #mva-pop .mva-pfp-row { display: flex; align-items: center; gap: 8px; }
+            #mva-pfp-preview {
+                width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: none;
+                background: var(--secondary-button-background, rgba(128,128,128,.15));
+            }
+            #mva-pop button#mva-pfp-pick, #mva-pop button#mva-pfp-clear {
+                appearance: none; -webkit-appearance: none;
+                background: var(--secondary-button-background, rgba(128,128,128,.15));
+                color: var(--primary-text, #e4e6eb);
+                border: 1px solid var(--divider, rgba(128,128,128,.25)); border-radius: 8px;
+                padding: 4px 10px; font: inherit; cursor: pointer;
+            }
+            #mva-pop button#mva-pfp-pick:hover, #mva-pop button#mva-pfp-clear:hover { border-color: var(--accent, #0a84ff); }
             .mva-avatar {
                 position: absolute; left: 14px; bottom: 6px; width: 28px; height: 28px;
                 border-radius: 50%; object-fit: cover; z-index: 5; pointer-events: none;
@@ -170,7 +187,6 @@
     //   "At <month day, year>, <time>, <Sender>: <message>"  (date adds commas)
     function parseMsg(el) {
         const lab = el.getAttribute('aria-label') || '';
-        // Anchor on the time's am/pm (case-insensitive: "9:11 PM" or "6:04pm").
         let m = lab.match(/[ap]m,\s+([^:]+?)(?::|$)/i);
         if (!m) m = lab.match(/^At\s[^,]+,\s+([^:]+?)(?::|$)/);   // 24h fallback
         const sender = m ? m[1].trim() : '';
@@ -243,6 +259,7 @@
     }
 
     function getMyAvatarUrl() {
+        if (myCustomPfp) return myCustomPfp;   // live override, not cached
         if (myAvatarUrl) return myAvatarUrl;
         const btn = document.querySelector(SEL.accountBtn);
         let url = '';
@@ -251,8 +268,34 @@
             if (im) url = im.getAttribute('xlink:href') || im.getAttribute('href') || '';
             if (!url) { const img = btn.querySelector('img'); if (img) url = img.src; }
         }
-        myAvatarUrl = url || SILHOUETTE;
-        return myAvatarUrl;
+        if (url) return (myAvatarUrl = url);   // cache only the real pic
+        return SILHOUETTE;                     // not cached — retry once it mounts
+    }
+
+    // Read an image File into a small downscaled data: URI — compact enough to
+    // persist and CSP-safe (Messenger allows data: images, blocks external URLs).
+    // Calls back with null if the image can't be decoded (we don't fall back to
+    // the raw multi-MB data URL — it would blow the storage quota).
+    function fileToDataUrl(file, maxSize, cb) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+                    const w = Math.max(1, Math.round(img.width * scale));
+                    const h = Math.max(1, Math.round(img.height * scale));
+                    const c = document.createElement('canvas');
+                    c.width = w; c.height = h;
+                    c.getContext('2d').drawImage(img, 0, 0, w, h);
+                    cb(c.toDataURL('image/jpeg', 0.85));
+                } catch (e) { cb(null); }
+            };
+            img.onerror = () => cb(null);
+            img.src = reader.result;
+        };
+        reader.onerror = () => cb(null);
+        reader.readAsDataURL(file);
     }
 
     function fallbackSamples() {
@@ -277,11 +320,11 @@
         let blueBg, blueText, greyBg, greyText;
         for (const msg of msgs) {
             const b = findBubble(msg);
-            if (!b || b.classList.contains('mva-touched')) continue;       // skip our own recolours
+            if (!b || b.classList.contains('mva-touched')) continue;
             const cs = getComputedStyle(b);
             if (cs.backgroundImage && cs.backgroundImage.indexOf('gradient') !== -1) continue;  // gradient => fallback
             const c = parseRGB(cs.backgroundColor);
-            if (!c || c.a < 0.1) continue;                                  // transparent
+            if (!c || c.a < 0.1) continue;
             // Read the TEXT colour from the LEAF that actually holds the message
             // text — the bubble wrapper (and its first dir="auto") often report
             // white even when the visible text is dark (e.g. a green sent bubble).
@@ -436,7 +479,7 @@
         const bubble = findBubble(msg);
         if (bubble) recolor(bubble, s.greyBg, s.greyText);
         setFlip(msg);
-        msg.style.setProperty('padding-left', '44px', 'important');  // gutter for my avatar
+        msg.style.setProperty('padding-left', '44px', 'important');
         hideReceipts(msg);
         return isComplete(msg, bubble);
     }
@@ -464,7 +507,7 @@
         for (const el of msg.querySelectorAll('div, span')) {
             const r = el.getBoundingClientRect();
             if (r.width < 16 || r.width > 56 || r.height < 14) continue;
-            if (el.textContent.trim()) continue;                 // skip bubble/text
+            if (el.textContent.trim()) continue;
             if (el.getAttribute('role') === 'toolbar' || el.querySelector('[role="toolbar"]')) continue;
             mark(el); el.classList.add('mva-collapse');
         }
@@ -490,7 +533,7 @@
     }
 
     function revertNode(msg) {
-        clearTouched(msg);                                        // idempotent
+        clearTouched(msg);
         msg.querySelectorAll('[style*="--mva"]').forEach(clearTouched);
         clearInjected(msg);
         delete msg.dataset.mvaKey;
@@ -611,7 +654,7 @@
                 name.className = 'mva-myname';
                 name.textContent = myDisplayName;
                 if (labelStyleCache) { name.style.color = labelStyleCache.color; name.style.fontSize = labelStyleCache.size; }
-                msgs[i].style.setProperty('padding-top', '18px', 'important');  // room for the label
+                msgs[i].style.setProperty('padding-top', '18px', 'important');
                 msgs[i].classList.add('mva-mypad');
                 msgs[i].appendChild(name);
             }
@@ -650,7 +693,7 @@
         rebuildOptions();
     }
 
-    // Gear button + popover that sets the display name shown above my messages.
+    // Gear button + popover for the display name and picture.
     function buildSettings(bar) {
         const gear = document.createElement('button');
         gear.id = 'mva-gear';
@@ -659,24 +702,54 @@
         gear.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94a7.5 7.5 0 0 0 .05-.94 7.5 7.5 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.62l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.43h-3.84a.5.5 0 0 0-.5.43l-.36 2.54a7 7 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.86a.5.5 0 0 0 .12.62l2.03 1.58a7.5 7.5 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.62l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96a7 7 0 0 0 1.62.94l.36 2.54a.5.5 0 0 0 .5.43h3.84a.5.5 0 0 0 .5-.43l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.62l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg>';
         bar.appendChild(gear);
 
+        // Keep browsers/password managers from treating these as credential fields.
+        const noFill = 'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+            'data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other"';
         const pop = document.createElement('div');
         pop.id = 'mva-pop';
-        pop.innerHTML = `<label>Your display name<input id="mva-name-input" type="text" placeholder="(blank)"
-            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-            data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other"></label>`;
+        pop.innerHTML =
+            `<label>Your display name<input id="mva-name-input" type="text" placeholder="(blank)" ${noFill}></label>` +
+            `<div class="mva-field"><span>Your display picture</span>` +
+            `<span class="mva-pfp-row"><img id="mva-pfp-preview" alt="">` +
+            `<button id="mva-pfp-pick" type="button">Choose…</button>` +
+            `<button id="mva-pfp-clear" type="button">Reset</button></span>` +
+            `<input id="mva-pfp-file" type="file" accept="image/*" hidden></div>`;
         bar.appendChild(pop);
 
-        const input = pop.querySelector('#mva-name-input');
-        input.value = myDisplayName;
+        const nameInput = pop.querySelector('#mva-name-input');
+        const fileInput = pop.querySelector('#mva-pfp-file');
+        const preview = pop.querySelector('#mva-pfp-preview');
+        nameInput.value = myDisplayName;
+        const refreshPreview = () => { preview.src = getMyAvatarUrl(); };
+        refreshPreview();
+
         gear.addEventListener('click', () => {
             pop.classList.toggle('mva-open');
-            if (pop.classList.contains('mva-open')) input.focus();
+            if (pop.classList.contains('mva-open')) nameInput.focus();
         });
-        input.addEventListener('input', () => {
-            myDisplayName = input.value;
-            saveName(myDisplayName);
-            forceRefresh = true;         // rebuild only the labels, not every bubble
-            applyMode();
+        // Each control updates live and rebuilds only the injected layer (not bubbles).
+        const apply = () => { forceRefresh = true; applyMode(); refreshPreview(); };
+        nameInput.addEventListener('input', () => {
+            myDisplayName = nameInput.value;
+            saveSetting(NAME_KEY, myDisplayName);
+            apply();
+        });
+        pop.querySelector('#mva-pfp-pick').addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
+            fileInput.value = '';                 // allow re-picking the same file
+            if (!file) return;
+            fileToDataUrl(file, 96, dataUrl => {
+                if (!dataUrl) return;             // undecodable image — keep current pic
+                myCustomPfp = dataUrl;
+                saveSetting(PFP_KEY, myCustomPfp);
+                apply();
+            });
+        });
+        pop.querySelector('#mva-pfp-clear').addEventListener('click', () => {
+            myCustomPfp = '';
+            saveSetting(PFP_KEY, '');
+            apply();
         });
         document.addEventListener('click', e => { if (!bar.contains(e.target)) pop.classList.remove('mva-open'); });
     }
@@ -703,7 +776,7 @@
         currentThread = t;
         currentMode = threadSelections[t] || OFF;
         knownMembers = [];
-        sampleCache = null;     // colours/theme differ per thread
+        sampleCache = null;
         labelStyleCache = null;
         sig++;
         rebuildOptions();
