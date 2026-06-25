@@ -16,13 +16,10 @@ modify these variables in the source code to adjust fade timing:
 
 ### messenger-view-as.user.js
 
-adds a "view as" dropdown to messenger.com chats that visually re-skins messages
-to reframe chats in a different perspective.
+adds a "view as" dropdown to messenger.com
 
-- **off** - normal view
-- **everyone (all received)** - your messages flip to grey/left with your profile
-  picture, so the whole chat looks like incoming messages
-- **a chat member** - additionally promotes that person's messages to blue/right
-  with no avatar, as if viewing from their perspective
+- **yourself** - normal view
+- **a chat member** - view the chat from their perspective
+- **nobody** - whole chat looks like incoming messages including yours
 
 the dropdown auto-populates with people who have sent messages in the currently-visible chat.
